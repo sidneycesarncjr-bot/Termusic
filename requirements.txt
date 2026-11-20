@@ -1,0 +1,5 @@
+textual==8.2.8
+textual-image
+mutagen
+Pillow
+rich
