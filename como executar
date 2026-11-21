@@ -3,7 +3,6 @@ Como executar
 1. Clonar o repositório
 
 git clone https://github.com/sidneycesarncjr-bot/Termusic
-cd Termusic
 
 2. Criar um ambiente virtual
 
