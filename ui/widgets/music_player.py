@@ -45,3 +45,13 @@ class MusicPlayer(Static):
             "[#888888]━━━━━━━━━━━━━━━━━━━━━━━━[/]\n"
             f"[#AAAAAA]00:00                         {duration}[/]"
         )
+
+    def clear_track(self):
+        self.query_one("#track-info", Static).update(
+            "[bold #FFFFFF]Nenhuma música selecionada[/]\n"
+            "[#888888]Artista desconhecido[/]"
+        )
+        self.query_one("#track-progress", Static).update(
+            "[#888888]━━━━━━━━━━━━━━━━━━━━━━━━[/]\n"
+            "[#AAAAAA]00:00                         00:00[/]"
+        )

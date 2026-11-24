@@ -7,11 +7,23 @@ from textual.widgets import Static
 from textual.binding import Binding
 from textual.message import Message
 
+from ui.historico import normalizar
+
 
 class MusicSelected(Message):
 
+    def __init__(self, music):
+        super().__init__()
+        self.music = music
 
 
+class MusicQueued(Message):
+    def __init__(self, music):
+        super().__init__()
+        self.music = music
+
+
+class MusicAddedToPlaylist(Message):
     def __init__(self, music):
         super().__init__()
         self.music = music
@@ -25,11 +37,12 @@ class MusicList(Static):
         Binding("up", "move_up", "Anterior", show=False),
         Binding("down", "move_down", "Próxima", show=False),
         Binding("enter", "select_music", "Selecionar", show=False),
+        Binding("q", "queue_music", "Adicionar à fila", show=False),
+        Binding("p", "add_to_playlist", "Adicionar à playlist", show=False),
     ]
 
     def __init__(self):
         super().__init__(id="music-list")
-        
 
         self.selected_index = 0
         self.musics = []
@@ -38,7 +51,7 @@ class MusicList(Static):
         self.update_list()
 
     def focus_list(self):
-     self.focus()
+        self.focus()
 
     def read_metadata(self, path):
 
@@ -113,7 +126,7 @@ class MusicList(Static):
 
     def filter_musics(self, search):
 
-        search = search.lower().strip()
+        search = normalizar(search)
 
         if not search:
             self.filtered_musics = self.musics[:]
@@ -122,8 +135,8 @@ class MusicList(Static):
             self.filtered_musics = [
                 music
                 for music in self.musics
-                if search in music["title"].lower()
-                or search in music["artist"].lower()
+                if search in normalizar(music["title"])
+                or search in normalizar(music["artist"])
             ]
 
         self.selected_index = 0
@@ -219,4 +232,16 @@ class MusicList(Static):
 
         self.post_message(
             MusicSelected(music)
+        )
+
+    def action_queue_music(self):
+        if not self.filtered_musics:
+            return
+        self.post_message(MusicQueued(self.filtered_musics[self.selected_index]))
+
+    def action_add_to_playlist(self):
+        if not self.filtered_musics:
+            return
+        self.post_message(
+            MusicAddedToPlaylist(self.filtered_musics[self.selected_index])
         )

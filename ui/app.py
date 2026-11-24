@@ -12,12 +12,24 @@ from textual_image.widget import Image
 from ui.widgets.sidebar import Sidebar
 from ui.widgets.music_player import MusicPlayer
 from ui.widgets.encontrar_pasta import FolderPicker
-from ui.widgets.music_list import MusicList, MusicSelected
+from ui.widgets.music_list import (
+    MusicList,
+    MusicSelected,
+    MusicQueued,
+    MusicAddedToPlaylist,
+)
 
 from ui.lista_musicas import find_music_files
 
 from ui.screens.home import get_content as home_content
 from ui.screens.library import get_content as library_content
+from ui.screens.history import get_content as history_content
+from ui.screens.queue import get_content as queue_content
+from ui.screens.playlist_screen import get_content as playlist_content
+
+from ui.historico import HistoricoPilha
+from ui.fila import Fila
+from ui.playlist import ListaDuplamenteCircular
 
 
 class TermusicApp(App):
@@ -29,13 +41,18 @@ class TermusicApp(App):
 
     def __init__(self):
         super().__init__()
-        
 
         self.selected_index = 0
         self.current_page = "Início"
         self.page_history = []
         self.music_count = 0
         self.current_cover = None
+
+        # Histórico de músicas reproduzidas
+        self.historico = HistoricoPilha(limite=100)
+        self.fila = Fila()
+        self.playlist = ListaDuplamenteCircular()
+        self.playlist_selected_index = 0
 
     CSS = """
 
@@ -126,6 +143,7 @@ class TermusicApp(App):
 
     """
 
+    # Montagem da interface
     def compose(self) -> ComposeResult:
 
         yield Sidebar()
@@ -150,6 +168,7 @@ class TermusicApp(App):
 
         yield MusicPlayer()
 
+    # Conteúdo de cada página
     def get_page_content(self, page):
 
         if page == "Início":
@@ -161,6 +180,18 @@ class TermusicApp(App):
         if page == "Biblioteca":
             return library_content()
 
+        if page == "Histórico":
+            return history_content(self.historico.listar())
+
+        if page == "Fila":
+            return queue_content(self.fila)
+
+        if page == "Playlist":
+            return playlist_content(self.playlist, self.playlist_selected_index)
+
+        return ""
+
+    # Carregamento das músicas
     async def load_music(self, folder):
 
         music_files = await asyncio.to_thread(
@@ -175,8 +206,10 @@ class TermusicApp(App):
 
         music_list.set_musics(music_files)
 
+        # Quantidade de músicas encontradas
         self.music_count = len(music_list.musics)
 
+    # Navegação da sidebar
     def move_selection(self, direction):
 
         self.selected_index = (
@@ -187,6 +220,7 @@ class TermusicApp(App):
             self.selected_index
         )
 
+    # Abertura das páginas
     def open_page(self):
 
         new_page = self.PAGES[self.selected_index]
@@ -224,6 +258,7 @@ class TermusicApp(App):
         else:
             self.set_focus(None)
 
+    # Seleção de pastas
     def on_folder_picker_folder_chosen(
         self,
         event: FolderPicker.FolderChosen
@@ -254,6 +289,7 @@ class TermusicApp(App):
 
         search_input.focus()
 
+    # Pesquisa de músicas
     def on_input_changed(self, event: Input.Changed):
 
         if event.input.id == "music-search":
@@ -262,22 +298,60 @@ class TermusicApp(App):
 
             music_list.filter_musics(event.value)
 
+    # Atualização da capa e do player visual
     def on_music_selected(self, event: MusicSelected):
+        self.selecionar_faixa(event.music)
 
-        self.current_cover = event.music.get("cover")
+        if self.current_page == "Histórico":
+            self.query_one("#page-content", Static).update(
+                self.get_page_content("Histórico")
+            )
+
+    def on_music_queued(self, event: MusicQueued):
+        self.fila.enfileirar(event.music)
+        if self.current_page == "Fila":
+            self.query_one("#page-content", Static).update(
+                self.get_page_content("Fila")
+            )
+        self.notify(f"Adicionada à fila: {event.music['title']}")
+
+    def on_music_added_to_playlist(self, event: MusicAddedToPlaylist):
+        estava_vazia = self.playlist.esta_vazia()
+        self.playlist.inserir_fim(event.music)
+        if estava_vazia:
+            self.mostrar_faixa(event.music)
+        if self.current_page == "Playlist":
+            self.query_one("#page-content", Static).update(
+                self.get_page_content("Playlist")
+            )
+        self.notify(f"Adicionada à playlist: {event.music['title']}")
+
+    def selecionar_faixa(self, music):
+        self.registrar_musica_tocada(music)
+        self.mostrar_faixa(music)
+
+    def mostrar_faixa(self, music):
+        self.current_cover = music.get("cover")
 
         cover_widget = self.query_one("#album-cover", Image)
-
         if self.current_cover:
-            cover_widget.image = PILImage.open(
-                BytesIO(self.current_cover)
-            )
+            cover_widget.image = PILImage.open(BytesIO(self.current_cover))
         else:
             cover_widget.image = None
 
-        player = self.query_one(MusicPlayer)
-        player.set_track(event.music)
+        self.query_one(MusicPlayer).set_track(music)
 
+    def atualizar_playlist(self):
+        self.query_one("#page-content", Static).update(
+            self.get_page_content("Playlist")
+        )
+
+    def limpar_faixa_atual(self):
+        self.current_cover = None
+        self.query_one("#album-cover", Image).image = None
+        self.query_one(MusicPlayer).clear_track()
+
+    # Controle de teclado
     def on_key(self, event):
 
         folder_tree = self.query_one("#folder-tree", FolderPicker)
@@ -286,11 +360,10 @@ class TermusicApp(App):
         page_content = self.query_one("#page-content", Static)
         cover_widget = self.query_one("#album-cover", Image)
 
-        # voltar com backspcace
+        # Voltar com Backspace
         if event.key == "backspace":
 
-            
-            # deixa o Input apagar o caractere.
+            # Deixa o Input apagar o caractere
             if self.focused is search_input:
                 return
 
@@ -357,7 +430,7 @@ class TermusicApp(App):
         # Biblioteca com lista aberta
         if music_list.styles.display == "block":
 
-            # TAB: alternar entre pesquisa e lista
+            # TAB alterna entre pesquisa e lista
             if event.key == "tab":
 
                 event.stop()
@@ -369,14 +442,67 @@ class TermusicApp(App):
 
                 return
 
-            # Se a pesquisa estiver focada,
-            # deixa o Input tratar as teclas.
+            # Deixa o Input tratar as teclas
             if self.focused is search_input:
                 return
 
-            # Setas e Enter são tratados pelos
-            # BINDINGS da classe MusicList.
+            # Setas e Enter são tratados pelos BINDINGS da MusicList
             return
+
+        if self.current_page == "Playlist":
+            tamanho = len(self.playlist)
+            if event.key in ("left", "right") and tamanho:
+                music = (
+                    self.playlist.anterior()
+                    if event.key == "left"
+                    else self.playlist.proxima()
+                )
+                self.playlist_selected_index = self.playlist.indice_atual()
+                self.selecionar_faixa(music)
+                self.atualizar_playlist()
+                event.stop()
+                return
+
+            if event.key in ("up", "down") and tamanho:
+                delta = -1 if event.key == "up" else 1
+                self.playlist_selected_index = (
+                    self.playlist_selected_index + delta
+                ) % tamanho
+                self.atualizar_playlist()
+                event.stop()
+                return
+
+            if event.key == "enter" and tamanho:
+                self.playlist.definir_atual_indice(
+                    self.playlist_selected_index
+                )
+                music = self.playlist.tocar_atual()
+                self.selecionar_faixa(music)
+                self.atualizar_playlist()
+                event.stop()
+                return
+
+            if event.key == "delete" and tamanho:
+                removendo_atual = (
+                    self.playlist.indice_atual()
+                    == self.playlist_selected_index
+                )
+                self.playlist.remover_indice(self.playlist_selected_index)
+                if len(self.playlist):
+                    self.playlist_selected_index %= len(self.playlist)
+                    atual = self.playlist.tocar_atual()
+                    if removendo_atual and atual is not None:
+                        self.mostrar_faixa(atual)
+                else:
+                    self.playlist_selected_index = 0
+                    self.limpar_faixa_atual()
+                self.atualizar_playlist()
+                event.stop()
+                return
+
+            if event.key in ("up", "down", "left", "right", "enter", "delete"):
+                event.stop()
+                return
 
         # Navegação da sidebar
         if event.key == "up":
@@ -393,3 +519,7 @@ class TermusicApp(App):
 
     def action_help_quit(self) -> None:
         pass
+
+    # Registro de músicas reproduzidas no histórico
+    def registrar_musica_tocada(self, music):
+        self.historico.push(music)

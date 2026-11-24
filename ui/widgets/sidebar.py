@@ -8,7 +8,9 @@ class Sidebar(Vertical):
     ITEMS = [
         "Início",
         "Biblioteca",
-        
+        "Histórico",
+        "Fila",
+        "Playlist",
     ]
 
     def __init__(self):
