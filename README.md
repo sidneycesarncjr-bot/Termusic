@@ -20,19 +20,39 @@ Player de música com biblioteca local, playlist circular, fila “tocar a segui
 ## Requisitos
 
 - Python 3.10 ou superior.
-- MPV instalado e disponível no `PATH`; o programa o controla pelo socket IPC local.
+- Git instalado para clonar o repositório.
+- MPV instalado e disponível no `PATH`; o programa usa socket IPC no Linux/macOS e named pipe no Windows. Veja as opções de instalação na [página oficial do MPV](https://mpv.io/installation/).
 - Dependências Python listadas em `requirements.txt`.
 
 ## Como executar
 
+Clone o projeto e entre na pasta:
+
+```bash
+git clone https://github.com/sidneycesarncjr-bot/Termusic.git
+cd Termusic
+```
+
+Linux/macOS:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 python main.py
 ```
 
-Instale o MPV separadamente antes de iniciar o aplicativo. O controle atual do MPV usa socket Unix, então a execução suportada é em Linux ou macOS.
+Windows (PowerShell ou Prompt de Comando):
+
+```text
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
+```
+
+No Windows, esses comandos usam diretamente o Python do ambiente virtual, sem precisar ativá-lo. Se preferir ativar o ambiente, use `.venv\Scripts\Activate.ps1` no PowerShell ou `.venv\Scripts\activate.bat` no `cmd`, depois execute `pip install -r requirements.txt` e `python main.py`.
+
+O MPV precisa estar instalado separadamente e acessível pelo `PATH` antes de iniciar o aplicativo.
 
 ## Controles
 
@@ -74,6 +94,12 @@ Execute:
 
 ```bash
 python -m ui.carga_avl
+```
+
+No Windows, execute com o Python do ambiente virtual:
+
+```powershell
+.\.venv\Scripts\python.exe -m ui.carga_avl
 ```
 
 O script insere 5.000 títulos em ordem crescente e informa a quantidade inserida e a altura observada da AVL. A AVL se mantém balanceada, portanto essa altura cresce proporcionalmente a O(log n), em vez de formar uma cadeia linear como uma BST sem balanceamento.
