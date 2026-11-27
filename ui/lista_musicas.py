@@ -2,8 +2,9 @@
 import os
 from pathlib import Path
 
+from ui.lista_encadeada import ListaEncadeada
 
-AUDIO_EXTENSIONS = {
+AUDIO_EXTENSIONS = (
     ".mp3",
     ".wav",
     ".flac",
@@ -22,7 +23,7 @@ AUDIO_EXTENSIONS = {
     ".ac3",
     ".mp2",
     ".au",
-}
+)
 
 #procura se tem musicas ou não no diretorio. se tiver ele mostra
 def find_music_files(music_folder):
@@ -30,9 +31,9 @@ def find_music_files(music_folder):
     music_folder = Path(music_folder)
 
     if not music_folder.is_dir():
-        return []
+        return ListaEncadeada()
 
-    music_files = []
+    music_files = ListaEncadeada()
 
     for root, dirs, files in os.walk(music_folder):
 
@@ -41,8 +42,8 @@ def find_music_files(music_folder):
             extension = Path(filename).suffix.lower()
 
             if extension in AUDIO_EXTENSIONS:
-                music_files.append(
+                music_files.inserir_fim(
                     os.path.join(root, filename)
                 )
 
-    return sorted(music_files, key=str.lower)
+    return music_files

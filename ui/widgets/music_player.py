@@ -17,7 +17,7 @@ class MusicPlayer(Static):
         )
 
         yield Static(
-            "[#AAAAAA]◀    [bold #B5F36D]▶[/]    ▶▶",
+            "[#AAAAAA]B: anterior  SPACE: pausar/tocar  N: próxima[/]",
             id="player-controls"
         )
 
@@ -54,4 +54,17 @@ class MusicPlayer(Static):
         self.query_one("#track-progress", Static).update(
             "[#888888]━━━━━━━━━━━━━━━━━━━━━━━━[/]\n"
             "[#AAAAAA]00:00                         00:00[/]"
+        )
+
+    def set_playback_state(self, playing, repeat_mode):
+        status = "pausar" if playing else "tocar"
+        if repeat_mode == "off":
+            repetir = "desligada"
+        elif repeat_mode == "one":
+            repetir = "faixa"
+        else:
+            repetir = "playlist"
+        controls = self.query_one("#player-controls", Static)
+        controls.update(
+            f"[#AAAAAA]B: anterior  SPACE: {status}  N: próxima  R: repetir {repetir}[/]"
         )

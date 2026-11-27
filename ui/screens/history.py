@@ -3,10 +3,9 @@ from rich.table import Table
 from rich.text import Text
 
 
-def get_content(musics=()):
-    """Monta a tela com as músicas selecionadas mais recentemente primeiro."""
-    items = list(musics)
-    if not items:
+def get_content(historico):
+    """Mostra as faixas do histórico da mais recente para a mais antiga."""
+    if historico.vazia():
         return Group(
             Text("HISTÓRICO", style="bold #B5F36D"),
             Text(""),
@@ -25,7 +24,7 @@ def get_content(musics=()):
     table.add_column("ARTISTA", ratio=3)
     table.add_column("DURAÇÃO", justify="right", width=10)
 
-    for music in items:
+    for music in historico.listar():
         table.add_row(
             music.get("title", "Faixa desconhecida"),
             music.get("artist", "Artista desconhecido"),

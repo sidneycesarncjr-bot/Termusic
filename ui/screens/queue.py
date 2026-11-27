@@ -5,8 +5,7 @@ from rich.text import Text
 
 
 def get_content(musics=()):
-    items = list(musics)
-    if not items:
+    if len(musics) == 0:
         return Group(
             Text("TOCAR A SEGUIR", style="bold #B5F36D"),
             Text(""),
@@ -26,7 +25,7 @@ def get_content(musics=()):
     table.add_column("ARTISTA", ratio=3)
     table.add_column("DURAÇÃO", justify="right", width=10)
 
-    for position, music in enumerate(items, start=1):
+    for position, music in enumerate(musics, start=1):
         table.add_row(
             str(position),
             escape(music.get("title", "Faixa desconhecida")),

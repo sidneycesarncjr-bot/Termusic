@@ -2,12 +2,18 @@
 from pathlib import Path
 
 from mutagen import File as MutagenFile
+from rich.console import Group
 from rich.table import Table
+from rich.text import Text
 from textual.widgets import Static
 from textual.binding import Binding
 from textual.message import Message
 
-from ui.historico import normalizar
+from ui.faixa import Faixa
+from ui.arvore_avl import ArvoreAVL
+from ui.lista_encadeada import ListaEncadeada
+from ui.tabela_hash import TabelaHash
+from ui.text_utils import normalizar
 
 
 class MusicSelected(Message):
@@ -39,19 +45,25 @@ class MusicList(Static):
         Binding("enter", "select_music", "Selecionar", show=False),
         Binding("q", "queue_music", "Adicionar à fila", show=False),
         Binding("p", "add_to_playlist", "Adicionar à playlist", show=False),
+        Binding("o", "toggle_sort_order", "Alternar ordenação AVL", show=False),
+        Binding("space", "toggle_playback", "Pausar/tocar", show=False),
+        Binding("n", "next_track", "Próxima faixa", show=False),
+        Binding("b", "previous_track", "Faixa anterior", show=False),
+        Binding("r", "cycle_repeat", "Alternar repetição", show=False),
     ]
 
     def __init__(self):
         super().__init__(id="music-list")
 
         self.selected_index = 0
-        self.musics = []
-        self.filtered_musics = []
+        self.filtered_musics = ListaEncadeada()
+        self.indice_titulos = TabelaHash()
+        self.arvore_titulos = ArvoreAVL("titulo")
+        self.arvore_duracoes = ArvoreAVL("duracao")
+        self.criterio_ordenacao = "titulo"
+        self.termo_pesquisa = ""
 
         self.update_list()
-
-    def focus_list(self):
-        self.focus()
 
     def read_metadata(self, path):
 
@@ -61,39 +73,29 @@ class MusicList(Static):
             if audio is None:
                 raise ValueError("Formato não reconhecido")
 
-            title = audio.get(
-                "title",
-                [Path(path).stem]
-            )[0]
+            titles = audio.get("title")
+            title = titles[0] if titles else Path(path).stem
 
-            artist = audio.get(
-                "artist",
-                ["Artista desconhecido"]
-            )[0]
+            artists = audio.get("artist")
+            artist = artists[0] if artists else "Artista desconhecido"
 
             duration_seconds = int(audio.info.length)
 
-            minutes = duration_seconds // 60
-            seconds = duration_seconds % 60
-
-            duration = f"{minutes:02d}:{seconds:02d}"
-
-            return {
-                "title": title,
-                "artist": artist,
-                "duration": duration,
-                "path": str(path),
-                "cover": self.read_cover(path)
-            }
+            return Faixa(
+                title,
+                artist,
+                duration_seconds,
+                str(path),
+                self.read_cover(path),
+            )
 
         except Exception:
-            return {
-                "title": Path(path).stem,
-                "artist": "Artista desconhecido",
-                "duration": "--:--",
-                "path": str(path),
-                "cover": None
-            }
+            return Faixa(
+                Path(path).stem,
+                "Artista desconhecido",
+                None,
+                str(path),
+            )
 
     def read_cover(self, path):
 
@@ -126,27 +128,51 @@ class MusicList(Static):
 
     def filter_musics(self, search):
 
+        self.termo_pesquisa = search
         search = normalizar(search)
+        self.filtered_musics = ListaEncadeada()
+        arvore = self._arvore_atual()
 
         if not search:
-            self.filtered_musics = self.musics[:]
+            for music in arvore.listar():
+                self.filtered_musics.inserir_fim(music)
 
         else:
-            self.filtered_musics = [
-                music
-                for music in self.musics
-                if search in normalizar(music["title"])
-                or search in normalizar(music["artist"])
-            ]
+            # A hash atende buscas exatas por título, inclusive títulos repetidos.
+            for music in self.indice_titulos.buscar(search):
+                self.filtered_musics.inserir_fim(music)
+
+            # Mantém a pesquisa parcial por título e artista como alternativa.
+            if self.filtered_musics.esta_vazia():
+                for music in arvore.listar():
+                    if (
+                        search in normalizar(music["title"])
+                        or search in normalizar(music["artist"])
+                    ):
+                        self.filtered_musics.inserir_fim(music)
 
         self.selected_index = 0
         self.update_list()
+
+    def _arvore_atual(self):
+        if self.criterio_ordenacao == "duracao":
+            return self.arvore_duracoes
+        return self.arvore_titulos
+
+    def action_toggle_sort_order(self):
+        self.criterio_ordenacao = (
+            "duracao" if self.criterio_ordenacao == "titulo" else "titulo"
+        )
+        self.filter_musics(self.termo_pesquisa)
 
     def update_list(self):
 
         if not self.filtered_musics:
             self.update(
-                "[#777777]Nenhuma música encontrada.[/]"
+                Group(
+                    Text(self._texto_ordenacao(), style="#777777"),
+                    Text("Nenhuma música encontrada.", style="#777777"),
+                )
             )
             return
 
@@ -187,16 +213,36 @@ class MusicList(Static):
                 style=style
             )
 
-        self.update(table)
+        self.update(
+            Group(
+                Text(self._texto_ordenacao(), style="#777777"),
+                table,
+            )
+        )
+
+    def _texto_ordenacao(self):
+        criterio = "título" if self.criterio_ordenacao == "titulo" else "duração"
+        return (
+            f"AVL por {criterio} • ENTER tocar • Q fila • P playlist • "
+            "N/B próxima/anterior • R repetição • TAB+O ordenar"
+        )
 
     def set_musics(self, music_files):
 
-        self.musics = [
-            self.read_metadata(path)
-            for path in music_files
-        ]
+        self.filtered_musics = ListaEncadeada()
+        self.indice_titulos = TabelaHash()
+        self.arvore_titulos = ArvoreAVL("titulo")
+        self.arvore_duracoes = ArvoreAVL("duracao")
+        self.termo_pesquisa = ""
 
-        self.filtered_musics = self.musics[:]
+        for path in music_files:
+            music = self.read_metadata(path)
+            self.indice_titulos.inserir(music)
+            self.arvore_titulos.inserir(music)
+            self.arvore_duracoes.inserir(music)
+
+        for music in self._arvore_atual().listar():
+            self.filtered_musics.inserir_fim(music)
 
         self.selected_index = 0
         self.update_list()
@@ -245,3 +291,15 @@ class MusicList(Static):
         self.post_message(
             MusicAddedToPlaylist(self.filtered_musics[self.selected_index])
         )
+
+    def action_toggle_playback(self):
+        self.app.toggle_playback()
+
+    def action_next_track(self):
+        self.app.next_track()
+
+    def action_previous_track(self):
+        self.app.previous_track()
+
+    def action_cycle_repeat(self):
+        self.app.cycle_repeat_mode()

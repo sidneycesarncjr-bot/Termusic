@@ -1,7 +1,4 @@
 
-from textual.widgets import Static
-
-
 def get_content():
     return (
         "[bold white]Biblioteca[/]\n\n"

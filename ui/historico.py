@@ -1,49 +1,61 @@
-
-import unicodedata
-
-
-def normalizar(titulo: str) -> str:
-    """Remove acentos, padroniza maiúsculas e espaços."""
-
-    sem_acento = unicodedata.normalize("NFD", titulo)
-
-    sem_acento = "".join(
-        c for c in sem_acento
-        if unicodedata.category(c) != "Mn"
-    )
-
-    return " ".join(sem_acento.casefold().split())
+class NoPilha:
+    def __init__(self, faixa):
+        self.faixa = faixa
+        self.proximo = None
 
 
 class HistoricoPilha:
-    """Histórico de músicas reproduzidas (LIFO)."""
+    """Pilha manual LIFO para as faixas tocadas mais recentemente."""
 
-    def __init__(self, limite: int | None = None):
-        self._itens = []
+    def __init__(self, limite=None):
+        if limite is not None and limite < 0:
+            raise ValueError("O limite do histórico não pode ser negativo.")
+        self.topo = None
+        self.tamanho = 0
         self.limite = limite
 
     def push(self, faixa):
-        # Evita repetir a mesma faixa consecutivamente
-        if self._itens and self._itens[-1] is faixa:
+        novo = NoPilha(faixa)
+        novo.proximo = self.topo
+        self.topo = novo
+        self.tamanho += 1
+
+        if self.limite is not None and self.tamanho > self.limite:
+            self._remover_fundo()
+
+    def _remover_fundo(self):
+        if self.topo is None:
+            return
+        if self.topo.proximo is None:
+            self.topo = None
+            self.tamanho = 0
             return
 
-        self._itens.append(faixa)
-
-        if self.limite is not None:
-            while len(self._itens) > self.limite:
-                self._itens.pop(0)
+        atual = self.topo
+        while atual.proximo.proximo is not None:
+            atual = atual.proximo
+        atual.proximo = None
+        self.tamanho -= 1
 
     def pop(self):
-        return self._itens.pop() if self._itens else None
+        if self.topo is None:
+            return None
+        faixa = self.topo.faixa
+        self.topo = self.topo.proximo
+        self.tamanho -= 1
+        return faixa
 
     def peek(self):
-        return self._itens[-1] if self._itens else None
+        return None if self.topo is None else self.topo.faixa
 
     def listar(self):
-        return self._itens[::-1]
+        atual = self.topo
+        while atual is not None:
+            yield atual.faixa
+            atual = atual.proximo
 
     def vazia(self):
-        return not self._itens
+        return self.topo is None
 
     def __len__(self):
-        return len(self._itens)
+        return self.tamanho

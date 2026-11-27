@@ -5,8 +5,7 @@ from rich.text import Text
 
 
 def get_content(playlist, selected_index=0):
-    items = list(playlist)
-    if not items:
+    if playlist.esta_vazia():
         return Group(
             Text("PLAYLIST", style="bold #B5F36D"),
             Text(""),
@@ -28,7 +27,7 @@ def get_content(playlist, selected_index=0):
 
     atual_index = playlist.indice_atual()
 
-    for index, music in enumerate(items):
+    for index, music in enumerate(playlist):
         marker = "▶" if index == atual_index else " "
         style = "bold #B5F36D" if index == selected_index else "#FFFFFF"
         table.add_row(

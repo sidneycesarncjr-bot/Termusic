@@ -18,7 +18,7 @@ def get_content(music_count=0, cover_data=None):
     return Group(
         Text("TERMUSIC", style="bold #B5F36D"),
         Text("UFAL - 2026", style="bold white"),
-        Text("Alunos: a,b,c,d", style="#777777"),
+        Text("Projeto de Estrutura de Dados", style="#777777"),
         Text(""),
         Rule(style="#303030"),
         Text(""),

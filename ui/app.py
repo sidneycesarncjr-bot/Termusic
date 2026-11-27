@@ -30,6 +30,7 @@ from ui.screens.playlist_screen import get_content as playlist_content
 from ui.historico import HistoricoPilha
 from ui.fila import Fila
 from ui.playlist import ListaDuplamenteCircular
+from ui.audio_player import AudioPlayer
 
 
 class TermusicApp(App):
@@ -44,15 +45,53 @@ class TermusicApp(App):
 
         self.selected_index = 0
         self.current_page = "Início"
-        self.page_history = []
         self.music_count = 0
         self.current_cover = None
+        self.current_music = None
+        self.audio_player = AudioPlayer()
+        self.playback_active = False
+        self.play_request_id = 0
+        self.repeat_mode = "all"
 
         # Histórico de músicas reproduzidas
         self.historico = HistoricoPilha(limite=100)
         self.fila = Fila()
         self.playlist = ListaDuplamenteCircular()
         self.playlist_selected_index = 0
+
+    def on_mount(self):
+        self.run_worker(
+            self.monitor_playback(),
+            name="playback-monitor",
+            exclusive=True,
+        )
+
+    async def on_unmount(self):
+        await asyncio.to_thread(self.audio_player.close)
+
+    async def monitor_playback(self):
+        while True:
+            await asyncio.sleep(0.4)
+            if not self.playback_active:
+                continue
+            # O resultado pode chegar depois que o usuário já mudou de faixa.
+            # Associe a consulta ao carregamento que estava ativo ao iniciá-la.
+            request_id = self.play_request_id
+            try:
+                terminou = await asyncio.to_thread(self.audio_player.is_ended)
+            except Exception as error:
+                if request_id != self.play_request_id:
+                    continue
+                self.playback_active = False
+                self.notify(f"Erro ao consultar o MPV: {error}", severity="error")
+                continue
+            if (
+                request_id == self.play_request_id
+                and terminou
+                and self.playback_active
+            ):
+                self.playback_active = False
+                self._on_track_finished()
 
     CSS = """
 
@@ -181,7 +220,7 @@ class TermusicApp(App):
             return library_content()
 
         if page == "Histórico":
-            return history_content(self.historico.listar())
+            return history_content(self.historico)
 
         if page == "Fila":
             return queue_content(self.fila)
@@ -207,7 +246,7 @@ class TermusicApp(App):
         music_list.set_musics(music_files)
 
         # Quantidade de músicas encontradas
-        self.music_count = len(music_list.musics)
+        self.music_count = len(music_list.indice_titulos)
 
     # Navegação da sidebar
     def move_selection(self, direction):
@@ -228,7 +267,6 @@ class TermusicApp(App):
         if new_page == self.current_page:
             return
 
-        self.page_history.append(self.current_page)
         self.current_page = new_page
 
         page_content = self.query_one("#page-content", Static)
@@ -300,26 +338,26 @@ class TermusicApp(App):
 
     # Atualização da capa e do player visual
     def on_music_selected(self, event: MusicSelected):
-        self.selecionar_faixa(event.music)
-
-        if self.current_page == "Histórico":
-            self.query_one("#page-content", Static).update(
-                self.get_page_content("Histórico")
-            )
+        no_existente = self.playlist.buscar(event.music)
+        if no_existente is None:
+            self.playlist.inserir_fim(event.music)
+            faixa = event.music
+        else:
+            faixa = no_existente.dado
+        self.playlist.definir_atual(faixa)
+        self.selecionar_faixa(faixa)
 
     def on_music_queued(self, event: MusicQueued):
         self.fila.enfileirar(event.music)
-        if self.current_page == "Fila":
-            self.query_one("#page-content", Static).update(
-                self.get_page_content("Fila")
-            )
+        self.atualizar_fila()
         self.notify(f"Adicionada à fila: {event.music['title']}")
+        if self.current_music is None:
+            proxima = self.fila.desenfileirar()
+            self.atualizar_fila()
+            self.selecionar_faixa(proxima)
 
     def on_music_added_to_playlist(self, event: MusicAddedToPlaylist):
-        estava_vazia = self.playlist.esta_vazia()
         self.playlist.inserir_fim(event.music)
-        if estava_vazia:
-            self.mostrar_faixa(event.music)
         if self.current_page == "Playlist":
             self.query_one("#page-content", Static).update(
                 self.get_page_content("Playlist")
@@ -327,8 +365,41 @@ class TermusicApp(App):
         self.notify(f"Adicionada à playlist: {event.music['title']}")
 
     def selecionar_faixa(self, music):
-        self.registrar_musica_tocada(music)
+        self.current_music = music
+        self.playback_active = False
+        self.play_request_id += 1
+        request_id = self.play_request_id
         self.mostrar_faixa(music)
+        self.run_worker(
+            self._play_track(music, request_id),
+            name="play-track",
+            exclusive=True,
+        )
+
+    async def _play_track(self, music, request_id):
+        try:
+            await asyncio.to_thread(self.audio_player.play, music.path)
+        except Exception as error:
+            if request_id == self.play_request_id:
+                self.current_music = None
+                self.playback_active = False
+                self.notify(f"Não foi possível tocar a faixa: {error}", severity="error")
+                self.query_one(MusicPlayer).set_playback_state(
+                    False, self.repeat_mode
+                )
+            return
+
+        if request_id != self.play_request_id:
+            return
+        self.playback_active = True
+        self.registrar_musica_tocada(music)
+        self.query_one(MusicPlayer).set_playback_state(
+            True, self.repeat_mode
+        )
+        if self.current_page == "Histórico":
+            self.query_one("#page-content", Static).update(
+                self.get_page_content("Histórico")
+            )
 
     def mostrar_faixa(self, music):
         self.current_cover = music.get("cover")
@@ -340,16 +411,137 @@ class TermusicApp(App):
             cover_widget.image = None
 
         self.query_one(MusicPlayer).set_track(music)
+        self.query_one(MusicPlayer).set_playback_state(
+            self.playback_active, self.repeat_mode
+        )
+
+    def atualizar_fila(self):
+        if self.current_page == "Fila":
+            self.query_one("#page-content", Static).update(
+                self.get_page_content("Fila")
+            )
+
+    def next_track(self):
+        if not self.fila.esta_vazia():
+            music = self.fila.desenfileirar()
+            self.atualizar_fila()
+            self.selecionar_faixa(music)
+            return
+
+        if self.playlist.esta_vazia():
+            self.notify("Não há próxima faixa na fila ou playlist.")
+            return
+
+        if (
+            self.repeat_mode == "off"
+            and self.playlist.indice_atual() == len(self.playlist) - 1
+        ):
+            self.notify("Você chegou ao fim da playlist.")
+            return
+
+        music = self.playlist.proxima()
+        self.playlist_selected_index = self.playlist.indice_atual()
+        self.selecionar_faixa(music)
+        self.atualizar_playlist()
+
+    def previous_track(self):
+        if self.playlist.esta_vazia():
+            self.notify("A playlist está vazia.")
+            return
+        if self.repeat_mode == "off" and self.playlist.indice_atual() == 0:
+            self.notify("Você está no início da playlist.")
+            return
+        music = self.playlist.anterior()
+        self.playlist_selected_index = self.playlist.indice_atual()
+        self.selecionar_faixa(music)
+        self.atualizar_playlist()
+
+    def cycle_repeat_mode(self):
+        modos = ("off", "one", "all")
+        indice = modos.index(self.repeat_mode)
+        self.repeat_mode = modos[(indice + 1) % len(modos)]
+        self.notify(f"Modo de repetição: {self.repeat_mode}")
+        self.query_one(MusicPlayer).set_playback_state(
+            self.playback_active, self.repeat_mode
+        )
+
+    def toggle_playback(self):
+        if self.current_music is None:
+            self.notify("Selecione uma faixa primeiro.")
+            return
+        self.run_worker(
+            self._toggle_playback(),
+            name="toggle-playback",
+            exclusive=True,
+        )
+
+    async def _toggle_playback(self):
+        try:
+            pausado = await asyncio.to_thread(self.audio_player.is_paused)
+            if pausado:
+                await asyncio.to_thread(self.audio_player.resume)
+                self.playback_active = True
+            else:
+                await asyncio.to_thread(self.audio_player.pause)
+                self.playback_active = False
+        except Exception as error:
+            self.notify(f"Não foi possível alterar a reprodução: {error}", severity="error")
+            return
+        self.query_one(MusicPlayer).set_playback_state(
+            self.playback_active, self.repeat_mode
+        )
+
+    def _on_track_finished(self):
+        atual = self.current_music
+        if atual is None:
+            return
+
+        if self.repeat_mode == "one":
+            # Recarregar o mesmo arquivo limpa o estado EOF do MPV e reinicia
+            # a faixa, inclusive quando ela terminou com keep-open habilitado.
+            self.selecionar_faixa(atual)
+            return
+
+        if not self.fila.esta_vazia():
+            proxima = self.fila.desenfileirar()
+            self.atualizar_fila()
+            self.selecionar_faixa(proxima)
+            return
+
+        if self.playlist.esta_vazia():
+            self.limpar_faixa_atual()
+            return
+
+        esta_na_ultima = self.playlist.indice_atual() == len(self.playlist) - 1
+        if self.repeat_mode == "off" and esta_na_ultima:
+            self.limpar_faixa_atual()
+            return
+
+        proxima = self.playlist.proxima()
+        self.playlist_selected_index = self.playlist.indice_atual()
+        self.selecionar_faixa(proxima)
+        self.atualizar_playlist()
 
     def atualizar_playlist(self):
         self.query_one("#page-content", Static).update(
             self.get_page_content("Playlist")
         )
 
-    def limpar_faixa_atual(self):
+    def limpar_faixa_atual(self, parar_audio=False):
+        self.current_music = None
+        self.playback_active = False
         self.current_cover = None
         self.query_one("#album-cover", Image).image = None
         self.query_one(MusicPlayer).clear_track()
+        self.query_one(MusicPlayer).set_playback_state(
+            False, self.repeat_mode
+        )
+        if parar_audio and self.audio_player.process:
+            self.run_worker(
+                asyncio.to_thread(self.audio_player.stop),
+                name="stop-playback",
+                exclusive=True,
+            )
 
     # Controle de teclado
     def on_key(self, event):
@@ -452,14 +644,10 @@ class TermusicApp(App):
         if self.current_page == "Playlist":
             tamanho = len(self.playlist)
             if event.key in ("left", "right") and tamanho:
-                music = (
-                    self.playlist.anterior()
-                    if event.key == "left"
-                    else self.playlist.proxima()
-                )
-                self.playlist_selected_index = self.playlist.indice_atual()
-                self.selecionar_faixa(music)
-                self.atualizar_playlist()
+                if event.key == "left":
+                    self.previous_track()
+                else:
+                    self.next_track()
                 event.stop()
                 return
 
@@ -483,19 +671,29 @@ class TermusicApp(App):
                 return
 
             if event.key == "delete" and tamanho:
+                indice_removido = self.playlist_selected_index
+                faixa_removida = self.playlist.item_no_indice(indice_removido)
                 removendo_atual = (
                     self.playlist.indice_atual()
-                    == self.playlist_selected_index
+                    == indice_removido
                 )
-                self.playlist.remover_indice(self.playlist_selected_index)
+                removendo_faixa_tocada = (
+                    self.current_music is not None
+                    and faixa_removida is not None
+                    and self.current_music.path == faixa_removida.path
+                )
+                self.playlist.remover_indice(indice_removido)
                 if len(self.playlist):
                     self.playlist_selected_index %= len(self.playlist)
                     atual = self.playlist.tocar_atual()
-                    if removendo_atual and atual is not None:
-                        self.mostrar_faixa(atual)
+                    if removendo_faixa_tocada and atual is not None:
+                        self.selecionar_faixa(atual)
+                    elif removendo_atual:
+                        self.atualizar_playlist()
                 else:
                     self.playlist_selected_index = 0
-                    self.limpar_faixa_atual()
+                    if removendo_faixa_tocada:
+                        self.limpar_faixa_atual(parar_audio=True)
                 self.atualizar_playlist()
                 event.stop()
                 return
@@ -505,6 +703,23 @@ class TermusicApp(App):
                 return
 
         # Navegação da sidebar
+        if event.key == "space":
+            event.stop()
+            self.toggle_playback()
+            return
+        if event.key == "n":
+            event.stop()
+            self.next_track()
+            return
+        if event.key == "b":
+            event.stop()
+            self.previous_track()
+            return
+        if event.key == "r":
+            event.stop()
+            self.cycle_repeat_mode()
+            return
+
         if event.key == "up":
             event.stop()
             self.move_selection(-1)
@@ -516,9 +731,6 @@ class TermusicApp(App):
         elif event.key == "enter":
             event.stop()
             self.open_page()
-
-    def action_help_quit(self) -> None:
-        pass
 
     # Registro de músicas reproduzidas no histórico
     def registrar_musica_tocada(self, music):

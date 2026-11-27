@@ -24,13 +24,15 @@ class ListaDuplamenteCircular:
 
     @staticmethod
     def _mesma_faixa(a, b):
-        """Compara faixas pelo caminho; usa igualdade para outros tipos."""
-        if isinstance(a, dict) and isinstance(b, dict):
-            caminho_a = a.get("path")
-            caminho_b = b.get("path")
-            if caminho_a is not None and caminho_b is not None:
-                return caminho_a == caminho_b
-        return a == b
+        caminho_a = getattr(a, "path", None)
+        caminho_b = getattr(b, "path", None)
+        if caminho_a is not None and caminho_b is not None:
+            return caminho_a == caminho_b
+        id_a = getattr(a, "id", None)
+        id_b = getattr(b, "id", None)
+        if id_a is not None and id_b is not None:
+            return id_a == id_b
+        return a is b
 
     def inserir_fim(self, dado):
         novo = No(dado)
@@ -166,22 +168,4 @@ class ListaDuplamenteCircular:
         no = self.fim.proximo
         for _ in range(self.tamanho):
             yield no.dado
-            no = no.proximo
-
-    @staticmethod
-    def _descricao(dado):
-        if isinstance(dado, dict):
-            titulo = dado.get("title", "Faixa desconhecida")
-            artista = dado.get("artist", "Artista desconhecido")
-            return f"{titulo} — {artista}"
-        return str(dado)
-
-    def exibir(self):
-        if self.esta_vazia():
-            print("[playlist vazia]")
-            return
-        no = self.fim.proximo
-        for indice in range(1, self.tamanho + 1):
-            marcador = "▶ " if no is self.atual else "  "
-            print(f"{marcador}{indice}. {self._descricao(no.dado)}")
             no = no.proximo
